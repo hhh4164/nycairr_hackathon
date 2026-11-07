@@ -1,0 +1,26 @@
+[project]
+name = "nycairr-hackathon"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "hhh4164", email = "donniemoy@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=2.0.0",
+    "lightgbm>=4.7.0",
+    "matplotlib>=3.11.2",
+    "pandas>=3.1.1",
+    "polars>=2.1.0",
+    "pyarrow>=26.0.1",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.1",
+]
+
+[project.scripts]
+nycairr-hackathon = "nycairr_hackathon:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
