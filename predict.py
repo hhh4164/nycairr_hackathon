@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from datetime import date as date_type
 from zoneinfo import ZoneInfo
 from pathlib import Path
 import joblib
@@ -9,10 +10,14 @@ from train.process import EXCLUDED_LINES, download_day, process_day
 from train.train import (MODEL_PATH, MAX_HEADWAY_SEC, DISRUPT_RATIO, DISRUPT_EXTRA_SEC, TZ, make_hourly, make_X)
 
 #currently data a day behind
-def get_predictions() -> pd.DataFrame:
+def get_predictions(target_date: date_type | str | None = None) -> pd.DataFrame:
     now = datetime.now(ZoneInfo(TZ))
-    target_date = pd.Timestamp(now.date())
-    day = (now - timedelta(hours=36)).strftime("%Y-%m-%d")
+    if target_date is None:
+        prediction_date = pd.Timestamp(now.date())
+        day = (now - timedelta(hours=36)).strftime("%Y-%m-%d")
+    else:
+        prediction_date = pd.Timestamp(target_date).normalize()
+        day = (prediction_date - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     bundle = joblib.load(MODEL_PATH)
     model = bundle["model"]
     normal = bundle["normal"]
@@ -43,7 +48,7 @@ def get_predictions() -> pd.DataFrame:
 
     combinations = normal[["line", "direction_id", "stop_id"]].drop_duplicates().reset_index(drop=True)
     predictions = combinations.merge(pd.DataFrame({"hour": range(24)}), how="cross")
-    predictions["is_weekend"] = int(target_date.dayofweek >= 5)
+    predictions["is_weekend"] = int(prediction_date.dayofweek >= 5)
 
     predictions = predictions.merge(yesterday_features, on=["line", "direction_id", "stop_id", "hour"], how="left")
     predictions = predictions.merge(daily_features, on=["line", "direction_id", "stop_id"], how="left")
@@ -61,7 +66,7 @@ def get_predictions() -> pd.DataFrame:
         "hour": predictions["hour"].values,
         "risk": probabilities,
         "data_day": day,
-        "prediction_date": target_date
+        "prediction_date": prediction_date
     })
 
     return predictions.sort_values(["line", "direction_id", "hour", "stop_id"]).reset_index(drop=True)

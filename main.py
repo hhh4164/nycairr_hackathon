@@ -3,8 +3,9 @@ from tkinter import ttk
 import threading
 import queue
 import math
+import argparse
 import pandas as pd
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from predict import get_predictions
@@ -138,8 +139,10 @@ class RoundedPanel(tk.Frame):
 
 
 class MtaDashboard:
-    def __init__(self, root):
+    def __init__(self, root, target_date=None, target_hour=None):
         self.root = root
+        self.target_date = target_date
+        self.target_hour = target_hour
         self.root.title("PredictMTA - Subway Disruption Dashboard")
         self.root.geometry("1160x800")
         self.root.minsize(900, 650)
@@ -149,10 +152,15 @@ class MtaDashboard:
         self.predictions = pd.DataFrame()
         self.all_page_size = 200
         self.all_page_index = 0
+        self.all_total_pages = 0
         self.all_sort_column = None
         self.all_sort_reverse = False
         self.follow_next_hour = True
-        self.current_next_hour = (datetime.now(ZoneInfo(TZ)).hour + 1) % 24
+        self.current_next_hour = (
+            target_hour if target_hour is not None
+            else 0 if target_date is not None
+            else (datetime.now(ZoneInfo(TZ)).hour + 1) % 24
+        )
         self.dark_mode = False
         self.themes = {
             "light": {
@@ -186,6 +194,7 @@ class MtaDashboard:
         self.load_predictions()
         self.check_queue()
         self.update_clock()
+        self.root.after_idle(self.root.focus_set)
 
     def create_widgets(self):
         header = tk.Frame(self.root, bg="#f4f4f4")
@@ -212,6 +221,17 @@ class MtaDashboard:
             bg="#f4f4f4"
         )
         self.clock_label.pack(anchor="w", padx=30, pady=(0, 10))
+        if self.target_date is not None:
+            self.target_date_label = tk.Label(
+                self.root,
+                text=(
+                    f"Target date: {self.target_date.isoformat()} · "
+                    f"Target time: {self.format_hour(self.current_next_hour)}"
+                ),
+                font=("Segoe UI", 10, "bold"),
+                bg="#f4f4f4"
+            )
+            self.target_date_label.pack(anchor="w", padx=30, pady=(0, 8))
 
         self.pages = ttk.Notebook(self.root)
         self.pages.pack(fill="both", expand=True, padx=20, pady=10)
@@ -383,21 +403,50 @@ class MtaDashboard:
             bg="#f4f4f4",
             fg="gray"
         )
-        self.page_label.pack(side="left")
+        page_controls.grid_columnconfigure(0, weight=1)
+        page_controls.grid_columnconfigure(1, weight=1)
+        page_controls.grid_columnconfigure(2, weight=1)
+        self.page_label.grid(row=0, column=0, sticky="w")
+        go_controls = tk.Frame(page_controls, bg="#f4f4f4")
+        go_controls.grid(row=0, column=1)
+        tk.Label(
+            go_controls,
+            text="Go to page:",
+            font=("Segoe UI", 9),
+            bg="#f4f4f4",
+            fg="gray"
+        ).pack(side="left", padx=(0, 5))
+        self.page_number = tk.StringVar(value="1")
+        self.page_entry = ttk.Entry(
+            go_controls,
+            textvariable=self.page_number,
+            width=7
+        )
+        self.page_entry.pack(side="left")
+        self.page_entry.bind("<Return>", self.go_to_page)
+        self.page_entry.bind("<FocusIn>", lambda _event: self.page_entry.selection_clear())
+        ttk.Button(
+            go_controls,
+            text="Go",
+            command=self.go_to_page,
+            style="Action.TButton"
+        ).pack(side="left", padx=(5, 0))
+        navigation_controls = tk.Frame(page_controls, bg="#f4f4f4")
+        navigation_controls.grid(row=0, column=2, sticky="e")
         self.previous_page_button = ttk.Button(
-            page_controls,
+            navigation_controls,
             text="Previous",
             command=self.previous_prediction_page,
             style="Action.TButton"
         )
-        self.previous_page_button.pack(side="right", padx=(8, 0))
+        self.previous_page_button.pack(side="left", padx=(0, 8))
         self.next_page_button = ttk.Button(
-            page_controls,
+            navigation_controls,
             text="Next",
             command=self.next_prediction_page,
             style="Action.TButton"
         )
-        self.next_page_button.pack(side="right")
+        self.next_page_button.pack(side="left")
         self.tree.configure(style="Modern.Treeview")
         self.all_tree.configure(style="Modern.Treeview")
 
@@ -564,7 +613,8 @@ class MtaDashboard:
         group.pack(side="left", padx=(0, 20))
         tk.Label(group, text=label, bg="#f4f4f4").pack(anchor="w")
         combo = ttk.Combobox(
-            group, textvariable=variable, values=values, state="readonly", width=28
+            group, textvariable=variable, values=values, state="readonly",
+            width=28, takefocus=False, exportselection=False
         )
         combo.pack(anchor="w", pady=(4, 0))
         return combo
@@ -574,6 +624,9 @@ class MtaDashboard:
         self.clock_label.config(
             text=now.strftime("%A, %B %d, %Y  ·  %I:%M:%S %p")
         )
+        if self.target_date is not None:
+            self.root.after(1000, self.update_clock)
+            return
         next_hour = (now.hour + 1) % 24
         if next_hour != self.current_next_hour:
             self.current_next_hour = next_hour
@@ -643,7 +696,7 @@ class MtaDashboard:
 
     def fetch_predictions(self):
         try:
-            predictions = get_predictions()
+            predictions = get_predictions(self.target_date)
 
             self.prediction_queue.put(
                 ("success", predictions)
@@ -720,8 +773,13 @@ class MtaDashboard:
 
         self.predictions = predictions
         self.update_line_filter()
-        self.follow_next_hour = True
-        self.current_next_hour = (datetime.now(ZoneInfo(TZ)).hour + 1) % 24
+        self.follow_next_hour = self.target_date is None
+        self.current_next_hour = (
+            (datetime.now(ZoneInfo(TZ)).hour + 1) % 24
+            if self.target_date is None
+            else self.target_hour if self.target_hour is not None
+            else 0
+        )
         self.hour_filter.set(self.format_hour(self.current_next_hour))
         self.render_next_hour()
         self.display_all_predictions()
@@ -890,12 +948,14 @@ class MtaDashboard:
             rows = rows.sort_values("risk", ascending=not self.all_sort_reverse)
 
         total_pages = (len(rows) + self.all_page_size - 1) // self.all_page_size
+        self.all_total_pages = total_pages
         if total_pages == 0:
             self.all_page_index = 0
         else:
             self.all_page_index = min(self.all_page_index, total_pages - 1)
         start = self.all_page_index * self.all_page_size
         self.populate_tree(self.all_tree, rows.iloc[start:start + self.all_page_size])
+        self.page_number.set(str(self.all_page_index + 1 if total_pages else 0))
         self.page_label.config(
             text=f"Page {self.all_page_index + 1} of {total_pages} · {len(rows):,} predictions"
             if total_pages else "No matching stops"
@@ -906,6 +966,21 @@ class MtaDashboard:
         self.next_page_button.configure(
             state="normal" if self.all_page_index + 1 < total_pages else "disabled"
         )
+
+    def go_to_page(self, _event=None):
+        try:
+            requested_page = int(self.page_number.get())
+        except ValueError:
+            self.status_label.config(text="Enter a whole page number.")
+            return
+        total_pages = self.all_total_pages
+        if not 1 <= requested_page <= total_pages:
+            self.status_label.config(
+                text=f"Page must be between 1 and {total_pages}."
+            )
+            return
+        self.all_page_index = requested_page - 1
+        self.display_all_predictions()
 
     def previous_prediction_page(self):
         if self.all_page_index > 0:
@@ -959,7 +1034,51 @@ class MtaDashboard:
             tree.move(item, "", index)
 
 
+def parse_target_date(value):
+    try:
+        parsed_date = date.fromisoformat(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "target date must use YYYY-MM-DD format"
+        ) from error
+    if parsed_date.isoformat() != value:
+        raise argparse.ArgumentTypeError(
+            "target date must use YYYY-MM-DD format"
+        )
+    return parsed_date
+
+
+def parse_target_hour(value):
+    try:
+        hour = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "target hour must be an integer from 0 to 23"
+        ) from error
+    if not 0 <= hour <= 23:
+        raise argparse.ArgumentTypeError(
+            "target hour must be an integer from 0 to 23"
+        )
+    return hour
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the PredictMTA dashboard.")
+    parser.add_argument(
+        "target_date",
+        nargs="?",
+        type=parse_target_date,
+        help="prediction target date in YYYY-MM-DD format"
+    )
+    parser.add_argument(
+        "target_hour",
+        nargs="?",
+        type=parse_target_hour,
+        help="target hour from 0 (12 AM) to 23 (11 PM); requires a target date"
+    )
+    args = parser.parse_args()
+    if args.target_hour is not None and args.target_date is None:
+        parser.error("target hour requires a target date")
     root = tk.Tk()
-    app = MtaDashboard(root)
+    app = MtaDashboard(root, args.target_date, args.target_hour)
     root.mainloop()
