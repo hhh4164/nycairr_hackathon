@@ -57,64 +57,44 @@ def process_day(day: str) -> pd.DataFrame:
     df = df.dropna(subset=["headway_sec"])
 
     df = df[df["headway_sec"] >= 0].copy()
-
-    df["timestamp"] = df["event_time"].astype("int64")
-
-    df["datetime"] = pd.to_datetime(
-        df["timestamp"], unit="s", utc=True
-    ).dt.tz_convert("America/New_York")
-
-    df["hour"] = df["datetime"].dt.hour
-    df["weekday"] = df["datetime"].dt.day_of_week
-
+    df["timestamp"] = pd.to_datetime(
+        df["event_time"], unit="s", utc=True).dt.floor("5min")
     out = (
-        df.groupby(
-            ["timestamp", "route_id", "direction_id", "stop_id"],
-            as_index=False
-        )
-        .agg(
-            avg_headway_sec=("headway_sec", "mean"),
-            max_headway_sec=("headway_sec", "max"),
-            n_trains=("trip_uid", "count"),
-            hour=("hour", "first"),
-            weekday=("weekday", "first")
-        )
-    )
-
-    out.to_parquet(
-        INTERIM / f"headways_{day}.parquet",
-        index=False
-    )
-
+        df.groupby(["timestamp", "route_id"], as_index=False).agg(
+            avg_headway_sec = ("headway_sec", "mean"),
+            max_headway_sec = ("headway_sec", "max"),
+            n_trains = ("trip_uid", "nunique"),
+        ).rename(columns = {"route_id": "line"}))
+    local = out["timestamp"].dt.tz_convert("America/New_York")
+    out["hour"] = local.dt.hour
+    out["weekday"] = local.dt.day_of_week
+    out.to_parquet(INTERIM / f"bins_{day}.parquet", index=False)
     return out
 
 def build_dataset(days):
-    daily_data = []
-
+    daily = []
     for day in days:
-        print(f"Processing {day}...")
-
-        download_day(day)
-        daily_data.append(process_day(day))
-
-    dataset = pd.concat(daily_data, ignore_index=True)
-
-    dataset = dataset.sort_values(
-        ["timestamp", "route_id", "stop_id"]
-    )
-
-    dataset.to_parquet(
-        "data/dataset.parquet",
-        index=False
-    )
-
-    print("\nDataset complete:")
-    print(dataset.shape)
+        cached = INTERIM / f"bins_{day}.parquet"
+        if cached.exists():
+            daily.append(pd.read_parquet(cached))
+            continue
+        try:
+            print(f"Processing {day}")
+            download_day(day)
+            daily.append(process_day(day))
+        except Exception as e:
+            print(f"Skipping {day}: {e}")
+            continue
+        for f in RAW.glob(f"subwaydatanyc_{day}_*.csv"):
+            f.unlink()
+    dataset = pd.concat(daily, ignore_index=True).sort_values(["timestamp", "line"])
+    dataset.to_parquet("data/dataset.parquet", index=False)
+    print("\nDataset complete:", dataset.shape)
     print(dataset.dtypes)
-
     return dataset
 
 if __name__ == "__main__":
-    days = pd.date_range("2026-10-01", "2026-11-01").strftime("%Y-%m-%d").tolist()
-
+    days = pd.date_range("2026-10-28", "2026-11-01").strftime("%Y-%m-%d").tolist()
     dataset = build_dataset(days)
+    print(dataset["max_headway_sec"].describe(percentiles=[.5, .9, .99]))
+    print(dataset.groupby("line")["avg_headway_sec"].median().sort_values())

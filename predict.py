@@ -5,7 +5,7 @@ from train.process import download_day, process_day
 
 #currently data a day behind
 def get_predictions():
-    day = (datetime.etdnow() - timedelta(days=1)).strftime("%Y-$m-$d")
+    day = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-$m-$d")
 
     try:
         download_day(day)
