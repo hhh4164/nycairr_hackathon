@@ -6,6 +6,8 @@ RAW = Path("data/raw/subway")
 RAW.mkdir(parents=True, exist_ok=True)
 INTERIM = Path("data/interim")
 INTERIM.mkdir(parents=True, exist_ok=True)
+TZ = "America/New_York"
+EXCLUDED_LINES = {"SS"}
 
 def download_day(day: str):
     url = f"https://subwaydata.nyc/data/subwaydatanyc_{day}_csv.tar.xz"
@@ -20,7 +22,8 @@ def process_day(day: str) -> pd.DataFrame:
         usecols=["trip_uid", "route_id", "direction_id"],
         dtype={
             "route_id": str,
-            "trip_uid": str
+            "trip_uid": str,
+            "direction_id": "Int64"
         }
     )
 
@@ -39,12 +42,13 @@ def process_day(day: str) -> pd.DataFrame:
     )
 
     df = st.merge(trips, on="trip_uid", how="inner")
+    df = df[~df["route_id"].isin(EXCLUDED_LINES)]
 
     df["event_time"] = (
         df["arrival_time"].fillna(df["departure_time"])
     )
 
-    df = df.dropna(subset=["event_time"])
+    df = df.dropna(subset=["event_time", "direction_id"])
 
     keys = ["route_id", "direction_id", "stop_id"]
 
@@ -60,12 +64,12 @@ def process_day(day: str) -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(
         df["event_time"], unit="s", utc=True).dt.floor("5min")
     out = (
-        df.groupby(["timestamp", "route_id"], as_index=False).agg(
+        df.groupby(["timestamp", "route_id", "direction_id"], as_index=False).agg(
             avg_headway_sec = ("headway_sec", "mean"),
             max_headway_sec = ("headway_sec", "max"),
             n_trains = ("trip_uid", "nunique"),
         ).rename(columns = {"route_id": "line"}))
-    local = out["timestamp"].dt.tz_convert("America/New_York")
+    local = out["timestamp"].dt.tz_convert(TZ)
     out["hour"] = local.dt.hour
     out["weekday"] = local.dt.day_of_week
     out.to_parquet(INTERIM / f"bins_{day}.parquet", index=False)
@@ -76,7 +80,8 @@ def build_dataset(days):
     for day in days:
         cached = INTERIM / f"bins_{day}.parquet"
         if cached.exists():
-            daily.append(pd.read_parquet(cached))
+            cached_df = pd.read_parquet(cached)
+            daily.append(cached_df[~cached_df["line"].isin(EXCLUDED_LINES)])
             continue
         try:
             print(f"Processing {day}")
@@ -87,7 +92,9 @@ def build_dataset(days):
             continue
         for f in RAW.glob(f"subwaydatanyc_{day}_*.csv"):
             f.unlink()
-    dataset = pd.concat(daily, ignore_index=True).sort_values(["timestamp", "line"])
+    if not daily:
+        raise RuntimeError("No data was successfully processed")
+    dataset = pd.concat(daily, ignore_index=True).sort_values(["timestamp", "line", "direction_id"])
     dataset.to_parquet("data/dataset.parquet", index=False)
     print("\nDataset complete:", dataset.shape)
     print(dataset.dtypes)
@@ -97,4 +104,4 @@ if __name__ == "__main__":
     days = pd.date_range("2026-09-1", "2026-11-01").strftime("%Y-%m-%d").tolist()
     dataset = build_dataset(days)
     print(dataset["max_headway_sec"].describe(percentiles=[.5, .9, .99]))
-    print(dataset.groupby("line")["avg_headway_sec"].median().sort_values())
+    print(dataset.groupby(["line", "direction_id"])["avg_headway_sec"].median().sort_values())

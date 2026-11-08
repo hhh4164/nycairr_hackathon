@@ -1,7 +1,7 @@
 from pathlib import Path
+from train.process import EXCLUDED_LINES
 import joblib
 import lightgbm as lgb
-import numpy as np 
 import pandas as pd
 from sklearn.metrics import average_precision_score
 
@@ -11,13 +11,14 @@ TZ = "America/New_York"
 MAX_HEADWAY_SEC = 2*60*60 
 DISRUPT_RATIO = 2.5
 DISRUPT_EXTRA_SEC = 10*60
-FEATURES = ["line", "hour", "is_weekend", "y_max_headway", "y_n_arrivals", "y_disrupted", "y_disrupted_hours"]
+FEATURES = ["line", "direction_id", "hour", "is_weekend", "y_max_headway", "y_n_arrivals", "y_disrupted", "y_disrupted_hours"]
 LABEL = "disrupted"
 TEST_DAYS = 14
 MODEL_PATH = ROOT/ "models" / "model.joblib"
 
 def load_data(path):
     df = pd.read_parquet(path)
+    df = df[~df["line"].isin(EXCLUDED_LINES)].copy()
     df["dt"] = df["timestamp"].dt.tz_convert(TZ)
     df["date"] = df["dt"].dt.tz_localize(None).dt.normalize()
 
@@ -34,7 +35,7 @@ def load_data(path):
 
 def make_hourly(df):
     hourly = (
-        df.groupby(["line", "date", "hour"], as_index=False).agg(
+        df.groupby(["line", "direction_id", "date", "hour"], as_index=False).agg(
             avg_headway = ("avg_headway_sec", "mean"),
             max_headway = ("max_headway_sec", "max"),
             n_arrivals = ("n_trains", "sum")
@@ -46,31 +47,31 @@ def make_hourly(df):
 
 def add_disruption_features(hourly):
     normal = (
-        hourly.groupby(["line", "hour", "is_weekend"], as_index=False)["max_headway"]
+        hourly.groupby(["line", "direction_id", "hour", "is_weekend"], as_index=False)["max_headway"]
             .median()
             .rename(columns={"max_headway": "normal_max_headway"})
     )
-    hourly = hourly.merge(normal, on=["line", "hour", "is_weekend"], how="left")
+    hourly = hourly.merge(normal, on=["line", "direction_id", "hour", "is_weekend"], how="left")
     much_worse = hourly["max_headway"] >= (DISRUPT_RATIO * hourly["normal_max_headway"])
     much_longer = hourly["max_headway"] >= hourly["normal_max_headway"] + DISRUPT_EXTRA_SEC
     hourly["disrupted"] = (much_worse & much_longer).astype(int)
     return hourly, normal
 
 def add_yesterday_features(hourly):
-    yesterday = hourly[["line", "date", "hour", "max_headway", "n_arrivals", "disrupted"]].copy()
+    yesterday = hourly[["line", "direction_id", "date", "hour", "max_headway", "n_arrivals", "disrupted"]].copy()
     yesterday["date"] = yesterday["date"] + pd.Timedelta(days=1)
     yesterday = yesterday.rename(columns = {
         "max_headway": "y_max_headway",
         "n_arrivals": "y_n_arrivals",
         "disrupted": "y_disrupted"
     })
-    hourly = hourly.merge(yesterday, on=["line", "date", "hour"], how="left")
+    hourly = hourly.merge(yesterday, on=["line", "direction_id", "date", "hour"], how="left")
     daily = (
-        hourly.groupby(["line", "date"], as_index=False)["disrupted"].sum()
+        hourly.groupby(["line", "direction_id", "date"], as_index=False)["disrupted"].sum()
             .rename(columns={"disrupted": "y_disrupted_hours"})
     )
     daily["date"] = daily["date"] + pd.Timedelta(days=1)
-    hourly = hourly.merge(daily, on=["line", "date"], how="left")
+    hourly = hourly.merge(daily, on=["line", "direction_id", "date"], how="left")
     hourly = hourly[hourly["date"] > hourly["date"].min()].copy()
     return hourly
 
@@ -84,6 +85,7 @@ def split_by_date(hourly):
 def make_X(d):
     X = d[FEATURES].copy()
     X["line"] = X["line"].astype("category")
+    X["direction_id"] = X["direction_id"].astype("category")
     return X
 
 def train_model(train):
@@ -124,12 +126,9 @@ if __name__ == "__main__":
     final_model = train_model(hourly)     # retrain on ALL days before saving
     save_model(final_model, normal)
 
-    print(
-    hourly[hourly.duplicated(["line", "hour"], keep=False)]
-    [["line", "date", "hour", "is_weekend"]]
-    .sort_values(["line", "hour"]))
+    print("\nRows per line-direction combination:")
+    print(hourly.groupby(["line", "direction_id"]).size().sort_index())
 
-    print(hourly.groupby(["line", "hour"]).size().value_counts())
-
-
+    print("\nHourly row counts:")
+    print(hourly.groupby(["line", "direction_id", "date"]).size().value_counts())
 
