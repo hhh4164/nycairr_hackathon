@@ -2,18 +2,18 @@
 
 ![PredictMTA logo](logo.png)
 
-PredictMTA is a Python application that estimates the risk of subway disruptions at individual New York City subway stops. It includes a Tkinter dashboard for exploring model predictions by line, direction, stop, and hour.
+PredictMTA is a Python application that estimates the probability of subway disruptions at individual New York City subway stops. It includes a Tkinter dashboard for exploring model predictions by line, direction, stop, and hour.
 
 ## Features
 
-- Displays predicted disruption risk for each line, direction, stop, and hour.
-- Shows the next-hour outlook by default, limited to high-risk stops (risk of 50% or higher).
+- Displays the model-estimated disruption probability for each line, direction, stop, and hour.
+- Shows the next-hour outlook by default, limited to stops with a predicted probability of 50% or higher.
 - Provides an explorer with filters for subway line, direction, stop, and hour, plus sortable, paginated results.
-- Categorizes risk as **Low** (under 25%), **Moderate** (25% to under 50%), or **High** (50% or higher).
+- Categorizes predicted probability as **Low** (under 25%), **Moderate** (25% to under 50%), or **High** (50% or higher).
 - Includes light and dark display modes.
 - Supports running predictions for a selected date and hour.
 
-The reported risk is the model's estimated probability of a disruption under its training definition; it is not a guarantee that an incident will occur.
+The displayed values are the model's estimated probabilities for a disruption under its training definition, not guarantees that incidents will occur. The model uses `predict_proba`; its probability outputs are not explicitly calibrated.
 
 ## Requirements
 
@@ -54,7 +54,7 @@ uv run python main.py 2026-10-31 5
 
 This selects 5 AM on October 31, 2026. The hour argument requires a date. Dates must use `YYYY-MM-DD`.
 
-The explorer's time filter starts at the selected target hour. You can choose another hour or **All hours**. The next-hour outlook displays only stops whose predicted risk is high; if none qualify, it shows that no incidents are predicted for that hour.
+The explorer's time filter starts at the selected target hour. You can choose another hour or **All hours**. The next-hour outlook displays only stops with a high predicted probability (50% or higher); if none qualify, it says there are no stops above that probability threshold for the selected hour.
 
 ## Optional: rebuild the dataset and retrain
 

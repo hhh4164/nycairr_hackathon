@@ -13,8 +13,8 @@ from predict import get_predictions
 from train.train import TZ
 
 
-MODERATE_RISK_THRESHOLD = 0.25
-HIGH_RISK_THRESHOLD = 0.50
+MODERATE_PROBABILITY_THRESHOLD = 0.25
+HIGH_PROBABILITY_THRESHOLD = 0.50
 
 
 DIRECTION_TERMINALS = {
@@ -69,10 +69,10 @@ def format_line_direction(line, direction_id):
     return f"{display_line} - {direction}"
 
 
-def risk_level(risk):
-    if risk >= HIGH_RISK_THRESHOLD:
+def probability_band(probability):
+    if probability >= HIGH_PROBABILITY_THRESHOLD:
         return "HIGH"
-    if risk >= MODERATE_RISK_THRESHOLD:
+    if probability >= MODERATE_PROBABILITY_THRESHOLD:
         return "MODERATE"
     return "LOW"
 
@@ -261,15 +261,15 @@ class MtaDashboard:
         stats_frame.pack(fill="x", padx=30, pady=10)
 
         self.total_label = self.create_stat_card(
-            stats_frame, "High-risk stops next hour", "Loading..."
+            stats_frame, "High-probability disruptions next hour", "Loading..."
         )
 
         self.average_label = self.create_stat_card(
-            stats_frame, "Average Risk", "Loading..."
+            stats_frame, "Average probability", "Loading..."
         )
 
         self.highest_label = self.create_stat_card(
-            stats_frame, "Highest Risk", "Loading..."
+            stats_frame, "Highest probability", "Loading..."
         )
         self.no_incidents_label = tk.Label(
             home_page,
@@ -291,7 +291,7 @@ class MtaDashboard:
         )
         table_content = table_frame.content
 
-        columns = ("line", "stop", "hour", "risk")
+        columns = ("line", "stop", "hour", "probability")
 
         self.tree = ttk.Treeview(
             table_content,
@@ -318,15 +318,15 @@ class MtaDashboard:
         )
 
         self.tree.heading(
-            "risk",
-            text="Disruption Risk",
-            command=lambda: self.sort_table("risk")
+            "probability",
+            text="Disruption Probability",
+            command=lambda: self.sort_table("probability")
         )
 
         self.tree.column("line", anchor="w", width=560)
         self.tree.column("stop", anchor="w", width=280)
         self.tree.column("hour", anchor="center", width=140)
-        self.tree.column("risk", anchor="center", width=160)
+        self.tree.column("probability", anchor="center", width=160)
 
         scrollbar = ttk.Scrollbar(
             table_content,
@@ -385,14 +385,14 @@ class MtaDashboard:
         all_table_content = all_table_frame.content
         self.all_tree = ttk.Treeview(
             all_table_content,
-            columns=("line", "stop", "hour", "risk"),
+            columns=("line", "stop", "hour", "probability"),
             show="headings"
         )
         for column, heading, width in (
             ("line", "Subway Line / Direction", 420),
             ("stop", "Stop", 310),
             ("hour", "Prediction Hour", 160),
-            ("risk", "Disruption Risk", 190)
+            ("probability", "Disruption Probability", 190)
         ):
             self.all_tree.heading(
                 column,
@@ -751,7 +751,7 @@ class MtaDashboard:
             self.average_label.config(text="N/A")
             self.highest_label.config(text="N/A")
             self.predictions = pd.DataFrame(
-                columns=["line", "direction_id", "stop_id", "stop_name", "hour", "risk"]
+                columns=["line", "direction_id", "stop_id", "stop_name", "hour", "probability"]
             )
             self.update_line_filter()
             self.no_incidents_label.pack(pady=(0, 10))
@@ -766,7 +766,7 @@ class MtaDashboard:
             "stop_id",
             "stop_name",
             "hour",
-            "risk",
+            "probability",
             "data_day"
         }
 
@@ -803,16 +803,16 @@ class MtaDashboard:
 
         self.status_label.config(
             text=(
-                f"No predicted incidents in the next hour."
+                f"No stops with high predicted probability for {self.format_hour(self.current_next_hour)}."
                 if not self.tree.get_children()
-                else f"Loaded high-risk stops for {self.format_hour(self.current_next_hour)}."
+                else f"Loaded high-probability disruptions for {self.format_hour(self.current_next_hour)}."
             )
         )
 
     def populate_tree(self, tree, predictions):
         tree.delete(*tree.get_children())
         for _, row in predictions.iterrows():
-            level = risk_level(row["risk"])
+            level = probability_band(row["probability"])
             stop_name = row["stop_name"] if pd.notna(row["stop_name"]) else row["stop_id"]
             tree.insert(
                 "",
@@ -821,7 +821,7 @@ class MtaDashboard:
                     format_line_direction(row["line"], row["direction_id"]),
                     stop_name,
                     self.format_hour(int(row["hour"])),
-                    f"{level} · {row['risk'] * 100:.1f}%"
+                    f"{level} · {row['probability'] * 100:.1f}%"
                 ),
                 tags=(level,)
             )
@@ -917,27 +917,27 @@ class MtaDashboard:
 
     def render_next_hour(self):
         if self.predictions.empty:
-            high_risk_predictions = self.predictions
+            high_probability_predictions = self.predictions
         else:
             next_predictions = self.predictions[
                 self.predictions["hour"] == self.current_next_hour
             ]
-            high_risk_predictions = next_predictions[
-                next_predictions["risk"] >= HIGH_RISK_THRESHOLD
+            high_probability_predictions = next_predictions[
+                next_predictions["probability"] >= HIGH_PROBABILITY_THRESHOLD
             ]
-        total = len(high_risk_predictions)
+        total = len(high_probability_predictions)
         self.total_label.config(text=str(total))
         self.average_label.config(
-            text=f"{high_risk_predictions['risk'].mean() * 100:.1f}%" if total else "N/A"
+            text=f"{high_probability_predictions['probability'].mean() * 100:.1f}%" if total else "N/A"
         )
         self.highest_label.config(
-            text=f"{high_risk_predictions['risk'].max() * 100:.1f}%" if total else "N/A"
+            text=f"{high_probability_predictions['probability'].max() * 100:.1f}%" if total else "N/A"
         )
         if total:
             self.no_incidents_label.pack_forget()
         else:
             self.no_incidents_label.pack(pady=(0, 10))
-        self.populate_tree(self.tree, high_risk_predictions)
+        self.populate_tree(self.tree, high_probability_predictions)
 
     def display_all_predictions(self):
         if not hasattr(self, "all_tree"):
@@ -961,8 +961,8 @@ class MtaDashboard:
                                     ascending=not self.all_sort_reverse)
         elif self.all_sort_column == "hour":
             rows = rows.sort_values("hour", ascending=not self.all_sort_reverse)
-        elif self.all_sort_column == "risk":
-            rows = rows.sort_values("risk", ascending=not self.all_sort_reverse)
+        elif self.all_sort_column == "probability":
+            rows = rows.sort_values("probability", ascending=not self.all_sort_reverse)
 
         total_pages = (len(rows) + self.all_page_size - 1) // self.all_page_size
         self.all_total_pages = total_pages
@@ -1028,7 +1028,7 @@ class MtaDashboard:
             if column == "hour":
                 sort_value = datetime.strptime(values[2], "%I:%M %p").hour
 
-            elif column == "risk":
+            elif column == "probability":
                 sort_value = float(values[3].split()[-1].replace("%", ""))
 
             elif column == "stop":

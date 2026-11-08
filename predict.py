@@ -64,7 +64,7 @@ def get_predictions(target_date: date_type | str | None = None) -> pd.DataFrame:
         "stop_id": predictions["stop_id"].values,
         "stop_name": predictions["stop_id"].astype(str).map(stop_names).fillna(predictions["stop_id"].astype(str)).values,
         "hour": predictions["hour"].values,
-        "risk": probabilities,
+        "probability": probabilities,
         "data_day": day,
         "prediction_date": prediction_date
     })
