@@ -9,18 +9,17 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "data" / "dataset.parquet"
 TZ = "America/New_York"
 MAX_HEADWAY_SEC = 2*60*60 
-DISRUPT_RATIO = 1.5
-DISRUPT_EXTRA_SEC = 5*60
+DISRUPT_RATIO = 2.5
+DISRUPT_EXTRA_SEC = 10*60
 FEATURES = ["line", "hour", "is_weekend", "y_max_headway", "y_n_arrivals", "y_disrupted", "y_disrupted_hours"]
 LABEL = "disrupted"
-TEST_DAYS = 1
+TEST_DAYS = 14
 MODEL_PATH = ROOT/ "models" / "model.joblib"
 
 def load_data(path):
     df = pd.read_parquet(path)
-    df["dt"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert(TZ)
+    df["dt"] = df["timestamp"].dt.tz_convert(TZ)
     df["date"] = df["dt"].dt.tz_localize(None).dt.normalize()
-    df["line"] = df["route_id"].astype(str) + "_" + df["direction_id"].astype(str)
 
     before = len(df)
     df = df[df["max_headway_sec"] <= MAX_HEADWAY_SEC]
@@ -38,7 +37,7 @@ def make_hourly(df):
         df.groupby(["line", "date", "hour"], as_index=False).agg(
             avg_headway = ("avg_headway_sec", "mean"),
             max_headway = ("max_headway_sec", "max"),
-            n_arrivals = ("stop_id", "size")
+            n_arrivals = ("n_trains", "sum")
         )
     )
     hourly["weekday"] = hourly["date"].dt.day_of_week
@@ -124,6 +123,13 @@ if __name__ == "__main__":
 
     final_model = train_model(hourly)     # retrain on ALL days before saving
     save_model(final_model, normal)
+
+    print(
+    hourly[hourly.duplicated(["line", "hour"], keep=False)]
+    [["line", "date", "hour", "is_weekend"]]
+    .sort_values(["line", "hour"]))
+
+    print(hourly.groupby(["line", "hour"]).size().value_counts())
 
 
 

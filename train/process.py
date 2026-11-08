@@ -94,7 +94,7 @@ def build_dataset(days):
     return dataset
 
 if __name__ == "__main__":
-    days = pd.date_range("2026-10-28", "2026-11-01").strftime("%Y-%m-%d").tolist()
+    days = pd.date_range("2026-09-1", "2026-11-01").strftime("%Y-%m-%d").tolist()
     dataset = build_dataset(days)
     print(dataset["max_headway_sec"].describe(percentiles=[.5, .9, .99]))
     print(dataset.groupby("line")["avg_headway_sec"].median().sort_values())
