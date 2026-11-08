@@ -4,6 +4,7 @@ import threading
 import queue
 import math
 import argparse
+from pathlib import Path
 import pandas as pd
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -144,9 +145,19 @@ class MtaDashboard:
         self.target_date = target_date
         self.target_hour = target_hour
         self.root.title("PredictMTA - Subway Disruption Dashboard")
-        self.root.geometry("1160x800")
+        self.root.geometry("1400x800")
         self.root.minsize(900, 650)
         self.root.configure(bg="#f4f4f4")
+        self.logo_image = tk.PhotoImage(
+            file=str(Path(__file__).resolve().with_name("logo.png"))
+        )
+        image_scale = max(
+            1,
+            (max(self.logo_image.width(), self.logo_image.height()) + 79) // 80
+        )
+        if image_scale > 1:
+            self.logo_image = self.logo_image.subsample(image_scale, image_scale)
+        self.root.iconphoto(True, self.logo_image)
         self.prediction_queue = queue.Queue()
         self.sort_reverse = {}
         self.predictions = pd.DataFrame()
@@ -199,6 +210,12 @@ class MtaDashboard:
     def create_widgets(self):
         header = tk.Frame(self.root, bg="#f4f4f4")
         header.pack(fill="x", padx=28, pady=(20, 6))
+        tk.Label(
+            header,
+            image=self.logo_image,
+            bg="#f4f4f4",
+            bd=0
+        ).pack(side="left", padx=(0, 12))
         title = tk.Label(
             header,
             text="NYC Subway Disruption Predictions",
