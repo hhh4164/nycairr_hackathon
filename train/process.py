@@ -64,7 +64,7 @@ def process_day(day: str) -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(
         df["event_time"], unit="s", utc=True).dt.floor("5min")
     out = (
-        df.groupby(["timestamp", "route_id", "direction_id"], as_index=False).agg(
+        df.groupby(["timestamp", "route_id", "direction_id", "stop_id"], as_index=False).agg(
             avg_headway_sec = ("headway_sec", "mean"),
             max_headway_sec = ("headway_sec", "max"),
             n_trains = ("trip_uid", "nunique"),
@@ -81,8 +81,9 @@ def build_dataset(days):
         cached = INTERIM / f"bins_{day}.parquet"
         if cached.exists():
             cached_df = pd.read_parquet(cached)
-            daily.append(cached_df[~cached_df["line"].isin(EXCLUDED_LINES)])
-            continue
+            if "stop_id" in cached_df.columns:
+                daily.append(cached_df[~cached_df["line"].isin(EXCLUDED_LINES)])
+                continue
         try:
             print(f"Processing {day}")
             download_day(day)
@@ -94,14 +95,14 @@ def build_dataset(days):
             f.unlink()
     if not daily:
         raise RuntimeError("No data was successfully processed")
-    dataset = pd.concat(daily, ignore_index=True).sort_values(["timestamp", "line", "direction_id"])
+    dataset = pd.concat(daily, ignore_index=True).sort_values(["timestamp", "line", "direction_id", "stop_id"])
     dataset.to_parquet("data/dataset.parquet", index=False)
     print("\nDataset complete:", dataset.shape)
     print(dataset.dtypes)
     return dataset
 
 if __name__ == "__main__":
-    days = pd.date_range("2026-09-1", "2026-11-01").strftime("%Y-%m-%d").tolist()
+    days = pd.date_range("2025-11-01", "2026-11-01").strftime("%Y-%m-%d").tolist()
     dataset = build_dataset(days)
     print(dataset["max_headway_sec"].describe(percentiles=[.5, .9, .99]))
     print(dataset.groupby(["line", "direction_id"])["avg_headway_sec"].median().sort_values())

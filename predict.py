@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
@@ -26,38 +27,44 @@ def get_predictions() -> pd.DataFrame:
 
     hourly = make_hourly(df)
     hourly = hourly[hourly["date"] == pd.Timestamp(day)].copy()
-    hourly = hourly.merge(normal, on=["line", "direction_id", "hour", "is_weekend"], how="left")
+    hourly = hourly.merge(normal, on=["line", "direction_id", "stop_id", "hour", "is_weekend"], how="left")
 
     valid = hourly["max_headway"].notna() & hourly["normal_max_headway"].notna()
     worse = hourly["max_headway"] >= DISRUPT_RATIO * hourly["normal_max_headway"]
     longer = hourly["max_headway"] >= hourly["normal_max_headway"] + DISRUPT_EXTRA_SEC
     hourly["y_disrupted"] = np.where(valid, (worse & longer).astype(float), np.nan)
 
-    yesterday_features = hourly[["line", "direction_id", "hour", "max_headway", "n_arrivals", "y_disrupted"]].rename(columns={
+    yesterday_features = hourly[["line", "direction_id", "stop_id", "hour", "max_headway", "n_arrivals", "y_disrupted"]].rename(columns={
         "max_headway": "y_max_headway",
         "n_arrivals": "y_n_arrivals"
     })
 
-    daily_features = hourly.groupby(["line", "direction_id"])["y_disrupted"].sum(min_count=1).reset_index(name="y_disrupted_hours")
+    daily_features = hourly.groupby(["line", "direction_id", "stop_id"])["y_disrupted"].sum(min_count=1).reset_index(name="y_disrupted_hours")
 
-    combinations = normal[["line", "direction_id"]].drop_duplicates().reset_index(drop=True)
+    combinations = normal[["line", "direction_id", "stop_id"]].drop_duplicates().reset_index(drop=True)
     predictions = combinations.merge(pd.DataFrame({"hour": range(24)}), how="cross")
     predictions["is_weekend"] = int(target_date.dayofweek >= 5)
 
-    predictions = predictions.merge(yesterday_features, on=["line", "direction_id", "hour"], how="left")
-    predictions = predictions.merge(daily_features, on=["line", "direction_id"], how="left")
+    predictions = predictions.merge(yesterday_features, on=["line", "direction_id", "stop_id", "hour"], how="left")
+    predictions = predictions.merge(daily_features, on=["line", "direction_id", "stop_id"], how="left")
     probabilities = model.predict_proba(make_X(predictions))[:, 1]
 
+    stop_names = pd.read_csv(
+        Path(__file__).resolve().parent / "stops.txt",
+        dtype=str
+    ).set_index("stop_id")["stop_name"]
     predictions = pd.DataFrame({
         "line": predictions["line"].values,
         "direction_id": predictions["direction_id"].values,
+        "stop_id": predictions["stop_id"].values,
+        "stop_name": predictions["stop_id"].astype(str).map(stop_names).fillna(predictions["stop_id"].astype(str)).values,
         "hour": predictions["hour"].values,
         "risk": probabilities,
         "data_day": day,
         "prediction_date": target_date
     })
 
-    return predictions.sort_values(["line", "direction_id", "hour"]).reset_index(drop=True)
+    return predictions.sort_values(["line", "direction_id", "hour", "stop_id"]).reset_index(drop=True)
 
 
 if __name__ == "__main__":
