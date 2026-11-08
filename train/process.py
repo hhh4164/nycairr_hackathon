@@ -65,7 +65,7 @@ def process_day(day: str) -> pd.DataFrame:
     ).dt.tz_convert("America/New_York")
 
     df["hour"] = df["datetime"].dt.hour
-    df["weekday"] = df["datetime"].dt.weekday
+    df["weekday"] = df["datetime"].dt.day_of_week
 
     out = (
         df.groupby(
@@ -115,12 +115,6 @@ def build_dataset(days):
     return dataset
 
 if __name__ == "__main__":
-    days = [
-        "2026-11-01",
-        "2026-11-02",
-        "2026-11-03",
-        "2026-11-04",
-        "2026-11-05"
-    ]
+    days = pd.date_range("2026-10-01", "2026-11-01").strftime("%Y-%m-%d").tolist()
 
     dataset = build_dataset(days)
